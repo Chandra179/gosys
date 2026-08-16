@@ -36,9 +36,17 @@ Skip raw `runtime.ReadMemStats()` (which triggers stop-the-world pauses). Use `r
 - `/memory/classes/heap/objects:bytes`
 - `/sched/goroutines:events`
 
+Two things to get right when reading these:
+
+- **Gauges vs. cumulative counters.** `/memory/classes/heap/objects:bytes` is an instant gauge — read it directly. `/gc/pauses:seconds` is a cumulative histogram distribution, so the dashboard needs the delta (Δ) between successive polling ticks to show *recent* pause behavior rather than the lifetime total.
+- **Zero-alloc polling.** Call `metrics.Read()` with a pre-allocated `[]metrics.Sample` slice reused across ticks, so the polling loop itself doesn't add GC pressure to the process it's observing.
+
 ### Real-Time HTMX UI
 
 Use Server-Sent Events (SSE) with HTMX (`hx-ext="sse"`). Your Go server streams HTML snippets (rendered via `html/template` and styled with Tailwind) over an HTTP/2 or HTTP/1.1 SSE connection every 500ms.
+
+- Assert `http.Flusher` on the response writer and call `Flush()` after each write, otherwise fragments sit buffered instead of reaching the client immediately.
+- Fan-out from the ticker to connected clients must be non-blocking (buffered channel + `select`/`default`) so one slow browser tab can't stall the telemetry collection loop or the simulator goroutines feeding it.
 
 ### Interactive Workload Simulator
 
@@ -59,6 +67,35 @@ Scanning a 500k-line codebase for runtime performance issues blindly leads to st
 - Buffer slicing (`buf[x:y]`) assigned to struct fields.
 - `map[string]*Struct` with high item counts.
 - `json.Unmarshal` or `make([]byte)` inside tight loops without `sync.Pool`.
+
+### pprof frame → AST node: one more gotcha
+
+`internal/astsite` already handles `token.FileSet` alignment and enclosing-node lookup via `astutil.PathEnclosingInterval` (see `CLAUDE.md` for the "ancestors, not descendants" bug that pattern already caught). Not yet accounted for: **inlining artifacts** — the compiler can report a pprof frame's file/line as the *call site* it was inlined into rather than the callee's own source location, which would silently misdirect a rule at the wrong AST node. Worth a fixture once a rule is written for a function commonly inlined.
+
+### Escape-analysis reference (candidate future rules)
+
+Beyond the three rules above, other AST-detectable patterns that reliably force heap escapes — useful as a backlog for new rules, each still needing its own fixture per the project's validation pattern:
+
+| Trigger | Why it escapes | AST pattern to detect |
+| --- | --- | --- |
+| Interface boxing | `fmt.Println(x)` or assigning a concrete type to `interface{}`/`any` wraps the value in a heap-allocated `eface`. | `ast.CallExpr` targeting variadic interface params, or assignment into an interface-typed struct field. |
+| Closure capturing | A function returns a closure (`ast.FuncLit`) referencing variables from the enclosing scope. | `ast.FuncLit` whose free identifiers resolve outside its own parameter list. |
+| Dynamic sizing | `make([]byte, n)` where `n` is a runtime variable, not a constant. | `ast.CallExpr` (`make`) whose length arg is an `ast.Ident` rather than an `ast.BasicLit`. |
+| Pointer escaping outward | Returning `&Struct{}` from a function. | `ast.ReturnStmt` containing an `ast.UnaryExpr` (`&`). |
+
+### Scaling to real codebases: god functions, vendor calls, dependency chains
+
+pprof doesn't care how large a function is — it resolves straight to `file:line`, so a 1,000-line handler costs no more to analyze than a 10-line one: `astutil.PathEnclosingInterval` targets only the enclosing statement, not the whole function body. Three gaps worth tracking as the rule set grows:
+
+- **God functions.** `internal/rules` already walks the parent path (`path[1]`, `path[2]`, …) from the hot node to answer "is this a struct-field assignment / inside a loop / captured by a closure" — see the `Rule` signature in `internal/rules/rules.go`. Not yet done: tracing a variable backward to its declaration via `types.Info.Uses` to check *how* it was allocated (e.g. was `buffer` in `s.field = buffer[10:20]` created via `make([]byte, 10<<20)` or something tiny?) — would cut `SliceIntoStructField` false positives on harmless small sub-views.
+- **Vendor / stdlib call sites.** pprof reports both `flat` (allocations on that exact line) and `cum` (that line plus everything it calls). If the hottest `flat` frame lands inside `$GOROOT` or `vendor/` (e.g. inside `encoding/json.Unmarshal`), there's no local AST to point a rule at — the fix is walking up `sample.Location` to the first frame whose file is in the target repo, and analyzing the *call site* instead. `internal/pprofstats` currently only aggregates the leaf frame (see `CLAUDE.md`), so any profile whose hottest frame is stdlib/vendor code falls through today — this fallback is a real gap, not just a nice-to-have.
+- **Cross-function dependency chains.** When the allocation happens inside a helper (`HelperB`) called from where pprof's cumulative weight actually points (`FunctionA`), `cum` identifies `FunctionA` as the bottleneck while `flat` points at `HelperB`'s own allocation line. Inspecting `HelperB`'s return type via `go/types` (e.g. does it return `map[string]*Data`?) would let a rule flag both the helper's definition and its call site in `FunctionA`. `MapPointerGrowth` today only looks at the map index-assignment at the hot site itself (`internal/rules/rules.go:96`), not at pointer-map values propagated back across a call boundary — same class of gap.
+
+### Noise control: metric gating, GC'd garbage, and when SSA would actually be needed
+
+- **Rank vs. absolute threshold.** `cfg.Top` (`internal/pipeline/pipeline.go`) gates rules by *rank* — the top N sites by bytes, default 10 — not by an absolute byte floor. A profile where even the #1 site is a few KB still gets run through every rule today. Worth adding: an optional `-min-bytes` gate so a rule never fires on a technically-top-ranked but practically-negligible allocation, independent of `-top`.
+- **Short-lived structs are already handled, for free.** No extra logic needed here: `inuse_space` (what `internal/pprofstats` prefers, see `CLAUDE.md`) only counts objects live *at snapshot time*. A slice stashed in a struct that's GC'd milliseconds later never shows up as a hot site in the first place — pprof's own sampling is the filter, not something the rule set has to reimplement.
+- **When scope-crawling stops being enough.** The parent-path walk (`path[1]`, `path[2]`, …) and `types.Info.Uses` backtracking described above cover *direct* assignments and one-hop indirection. If a rule ever needs to trace a value through several intermediate variables or function arguments before it lands in a struct field, that's a sign to reach for `golang.org/x/tools/go/ssa` (explicit control-flow graph, not another AST-walking heuristic) rather than deepening the parent-path check — but nothing in the current rule set needs it, so it's a deliberately deferred escalation, not a v1 dependency.
 
 ### Product Workflow — v1 (built)
 

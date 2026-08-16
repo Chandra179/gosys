@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>gosys</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="bg-white text-slate-900">
+  <main class="max-w-3xl mx-auto my-8 px-4">
+    <h1 class="text-2xl font-bold mb-6">gosys &mdash; pprof memory analyzer</h1>
+
+    <form hx-post="/analyze" hx-target="#results" hx-swap="innerHTML" hx-encoding="multipart/form-data"
+          class="space-y-4 border border-slate-200 rounded-lg p-4">
+      <div>
+        <label for="pprof" class="block font-semibold text-sm mb-1">Heap pprof file</label>
+        <input type="file" id="pprof" name="pprof" required class="block w-full text-sm">
+      </div>
+      <div>
+        <label for="repo" class="block font-semibold text-sm mb-1">Repo path (on this machine)</label>
+        <input type="text" id="repo" name="repo" value="{{.RepoDir}}" required
+               class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
+      </div>
+      <div>
+        <label for="top" class="block font-semibold text-sm mb-1">Top N allocation sites</label>
+        <input type="number" id="top" name="top" value="{{.Top}}" min="1"
+               class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
+      </div>
+      <button type="submit" class="bg-slate-900 text-white px-4 py-2 rounded text-sm font-semibold">
+        Analyze
+      </button>
+    </form>
+
+    <div id="results" class="mt-6">
+      {{template "results" .}}
+    </div>
+  </main>
+</body>
+</html>

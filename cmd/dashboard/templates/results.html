@@ -1,0 +1,24 @@
+{{define "results"}}
+{{if .Err}}
+  <div class="border border-red-300 bg-red-50 text-red-800 rounded-md p-4 whitespace-pre-wrap">{{.Err}}</div>
+{{else if not .Results}}
+  <p class="text-slate-500">no results</p>
+{{else}}
+  {{range .Results}}
+    <div class="border border-slate-200 rounded-lg p-4 mb-4 shadow-sm">
+      <h3 class="font-mono text-sm text-slate-700">{{.Site.File}}:{{.Site.Line}} &mdash; {{.Site.Flat}} bytes ({{.Site.Function}})</h3>
+      {{if .Findings}}
+        {{range .Findings}}
+          <div class="border-l-4 border-amber-500 pl-3 mt-3">
+            <div class="font-semibold text-amber-700">{{.Pattern}}</div>
+            <p class="text-sm text-slate-700 mt-1">{{.Message}}</p>
+            {{if .Source}}<pre class="bg-slate-50 text-sm p-2 mt-2 rounded overflow-x-auto">{{.Source}}</pre>{{end}}
+          </div>
+        {{end}}
+      {{else}}
+        <p class="text-slate-400 text-sm mt-2">no known anti-pattern matched</p>
+      {{end}}
+    </div>
+  {{end}}
+{{end}}
+{{end}}
