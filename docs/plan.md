@@ -76,3 +76,7 @@ Maybe it's not only for Go later, though—it can have many use cases. You know,
 
 - **User/Kernel Buffer Copying:** Excessive context switching and memory copying between user-space and kernel-space (lack of zero-copy / `sendfile`).
 - **Syscall Thrashing:** Making thousands of small system calls instead of batching I/O operations.
+
+## Questions
+
+should i use this as plugin so repository can import it? or do im import code from other repositories to this service or from that service register some kind of event to send the data to this service?
