@@ -16,21 +16,21 @@ go vet ./...
 go test ./...                              # all tests
 go test ./internal/pipeline/... -v         # the integration tests (see below)
 go test ./internal/pipeline/ -run TestSliceIntoStructField -v   # single test
-go run ./cmd/analyze -pprof heap.pprof -repo ./path -top 20     # run the CLI
+make dashboard                                                  # run the web UI (ADDR=:8080 by default)
 ```
 
 There is no separate lint config; `go vet` is the standard check.
 
 ## Architecture
 
-Pipeline: `internal/pprofstats` → `internal/astsite` → `internal/rules`, wired together by `internal/pipeline`, exposed via `cmd/analyze`.
+Pipeline: `internal/pprofstats` → `internal/astsite` → `internal/rules`, wired together by `internal/pipeline`, exposed via `cmd/dashboard`.
 
 - **`internal/pprofstats`** — parses a heap pprof file (`github.com/google/pprof/profile`), aggregates flat allocation value per `(function, file, line)` from each sample's *leaf* frame (prefers `inuse_space`, falls back to `alloc_space`), returns the top-N hottest sites.
 - **`internal/astsite`** — loads a repo with `golang.org/x/tools/go/packages` (`./...` pattern — note this means `testdata/` is excluded from scans by Go convention, same as `go build`), and resolves a pprof `file:line` to the enclosing AST node path via `astutil.PathEnclosingInterval`. Also matches pprof-reported file paths against loaded files with fallbacks (exact → suffix → basename) since pprof embeds whatever path the binary was built with, which may not match the repo's checkout path.
   - **Important gotcha already hit once:** `PathEnclosingInterval`'s returned path holds *ancestors* of the source line's interval. The innermost node is often a statement (e.g. `AssignStmt`), not a nested `CallExpr` on the same line — a rule looking only at ancestors for a `CallExpr` will silently never match. See `findAllocCall` in `internal/rules/rules.go` for the fix (checks ancestors, then walks into the innermost statement's subtree).
 - **`internal/rules`** — the anti-pattern rule set. Each `Rule` takes the AST path + site and returns a `*Finding` or `nil`. Rules are deliberately few and narrow (precision over recall): `SliceIntoStructField`, `MapPointerGrowth`, `AllocInLoopWithoutPool`. Adding a rule means adding a `Rule` func and registering it in `All`.
-- **`internal/pipeline`** — `Analyze(Config) ([]Result, error)` ties the three together; shared by `cmd/analyze` and by tests, so this is the entry point to call from new tooling.
-- **`cmd/analyze`** — thin CLI wrapper (`-pprof`, `-repo`, `-top` flags).
+- **`internal/pipeline`** — `Analyze(Config) ([]Result, error)` ties the three together; shared by `cmd/dashboard` and by tests, so this is the entry point to call from new tooling.
+- **`cmd/dashboard`** — HTMX+Tailwind web UI. Accepts a heap pprof either as a file upload or fetched live from a target's `net/http/pprof` endpoint (`GET http://<host:port>/debug/pprof/heap`), runs it against a repo path, and renders findings as an interactive package/site treemap plus a per-site list.
 
 ## Fixture-validated rules (important pattern to follow)
 
@@ -43,6 +43,6 @@ Every rule has a corresponding fixture package under `testdata/fixtures/<pattern
 
 This is not incidental test scaffolding — it's the project's mechanism for catching rules that look correct on inspection but don't actually fire against real profile data (this already caught one real bug in `findAllocCall`). **New rules should follow this same pattern**: add a fixture, capture a real profile, assert the rule fires — don't just eyeball the AST logic.
 
-## Two-part product context (see `docs/plan.md`)
+## Product direction (see `docs/plan.md`)
 
-The plan document also describes a second, separate piece: a live HTMX+Tailwind runtime diagnostics dashboard (`runtime/metrics` + SSE) with an anti-pattern *simulator*. That work is unstarted — nothing under `cmd/` or `internal/` currently implements it. If picked up, the established direction (from prior discussion in the plan doc) is: stdlib `runtime/metrics` read directly, no OpenTelemetry/Prometheus client dependency for v1 — those solve cross-service export/scraping, which isn't this tool's problem.
+`docs/plan.md` also discusses a live runtime diagnostics view (`runtime/metrics` + SSE) with an anti-pattern *simulator*; that was prototyped and then deliberately removed — it didn't visualize real analysis data. The dashboard's live-fetch (`/debug/pprof/heap`) is the real-data alternative that replaced it: pull a genuine snapshot on demand rather than animate synthetic data. If a live/streaming view is revisited, prefer periodic re-fetch over continuous streaming — rule matches are about code patterns, which don't change from moment to moment, so streaming mostly shows GC-cycle noise rather than new information.

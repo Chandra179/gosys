@@ -1,6 +1,7 @@
-// Command dashboard serves a small web UI around pipeline.Analyze: upload a
-// heap pprof file, point it at a repo on disk, and view the same findings
-// `cmd/analyze` prints, rendered as HTML instead of stdout.
+// Command dashboard serves a small web UI around pipeline.Analyze: supply a
+// heap pprof file (uploaded, or fetched live from a target's
+// /debug/pprof/heap), point it at a repo on disk, and view the findings
+// rendered as HTML.
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"gosys/internal/pipeline"
 )
@@ -112,7 +114,14 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(v, "%d", &data.Top)
 	}
 
-	profilePath, cleanup, err := saveUpload(r)
+	var profilePath string
+	var cleanup func()
+	var err error
+	if target := strings.TrimSpace(r.FormValue("target")); target != "" {
+		profilePath, cleanup, err = fetchLiveProfile(target)
+	} else {
+		profilePath, cleanup, err = saveUpload(r)
+	}
 	if err != nil {
 		data.Err = err.Error()
 		renderResults(w, data)
@@ -150,6 +159,36 @@ func saveUpload(r *http.Request) (path string, cleanup func(), err error) {
 		return "", nil, fmt.Errorf("create temp file: %w", err)
 	}
 	if _, err := io.Copy(tmp, file); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return "", nil, fmt.Errorf("write temp file: %w", err)
+	}
+	tmp.Close()
+
+	return tmp.Name(), func() { os.Remove(tmp.Name()) }, nil
+}
+
+// fetchLiveProfile pulls a heap profile directly from a running Go
+// process's net/http/pprof endpoint, saving the round trip of manually
+// capturing and uploading a file when the target is reachable from the
+// dashboard. target is a bare host:port (never a full URL) so the scheme
+// and path are always ours to control, not attacker-suppliable.
+func fetchLiveProfile(target string) (path string, cleanup func(), err error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get("http://" + target + "/debug/pprof/heap")
+	if err != nil {
+		return "", nil, fmt.Errorf("fetch heap profile from %s: %w", target, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("fetch heap profile from %s: unexpected status %s", target, resp.Status)
+	}
+
+	tmp, err := os.CreateTemp("", "gosys-live-*.pprof")
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return "", nil, fmt.Errorf("write temp file: %w", err)
