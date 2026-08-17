@@ -11,6 +11,7 @@ import (
 	"gosys/testdata/fixtures/loopalloc"
 	"gosys/testdata/fixtures/mapgrowth"
 	"gosys/testdata/fixtures/sliceleak"
+	"gosys/testdata/fixtures/strconcat"
 )
 
 // captureHeapProfile forces a GC (so the profile reflects live/inuse data,
@@ -137,5 +138,22 @@ func TestAllocInLoopWithoutPool_FileScopePool(t *testing.T) {
 	const fn = "gosys/testdata/fixtures/loopalloc.RunPooled"
 	if hasPatternForFunc(results, fn, "alloc-in-loop-without-pool") {
 		t.Errorf("expected no alloc-in-loop-without-pool finding for pooled code, got results: %+v", results)
+	}
+}
+
+func TestStringConcatInLoop(t *testing.T) {
+	strconcat.Run(20000, "x")
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/strconcat",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if !hasPattern(results, "string-concat-in-loop") {
+		t.Errorf("expected string-concat-in-loop finding, got results: %+v", results)
 	}
 }
