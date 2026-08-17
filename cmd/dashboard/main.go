@@ -1,7 +1,7 @@
-// Command dashboard serves a small web UI around pipeline.Analyze: supply a
-// heap pprof file (uploaded, or fetched live from a target's
-// /debug/pprof/heap), point it at a repo on disk, and view the findings
-// rendered as HTML.
+// Command dashboard serves a small web UI around pipeline.Analyze: fetch a
+// heap pprof profile live from a target's /debug/pprof/heap, run it against
+// the repo this dashboard is running from, and view the findings rendered
+// as HTML.
 package main
 
 import (
@@ -20,6 +20,11 @@ import (
 
 	"gosys/internal/pipeline"
 )
+
+// repoDir is the repo AST-matched against pprof sites: the checkout the
+// dashboard itself runs from, since findings only make sense against source
+// that matches the live target's build.
+const repoDir = "."
 
 //go:embed templates/*.html
 var templatesFS embed.FS
@@ -98,7 +103,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	renderPage(w, pageData{RepoDir: ".", Top: 10, TreemapJSON: treemapJSON(nil)})
+	renderPage(w, pageData{RepoDir: repoDir, Top: 10, TreemapJSON: treemapJSON(nil)})
 }
 
 func handleAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -108,21 +113,21 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		RepoDir: r.FormValue("repo"),
+		RepoDir: repoDir,
 		Top:     10,
 	}
 	if v := r.FormValue("top"); v != "" {
 		fmt.Sscanf(v, "%d", &data.Top)
 	}
 
-	var profilePath string
-	var cleanup func()
-	var err error
-	if target := strings.TrimSpace(r.FormValue("target")); target != "" {
-		profilePath, cleanup, err = fetchLiveProfile(target)
-	} else {
-		profilePath, cleanup, err = saveUpload(r)
+	target := strings.TrimSpace(r.FormValue("target"))
+	if target == "" {
+		data.Err = "live target is required"
+		renderResults(w, data)
+		return
 	}
+
+	profilePath, cleanup, err := fetchLiveProfile(target)
 	if err != nil {
 		data.Err = err.Error()
 		renderResults(w, data)
@@ -144,29 +149,6 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	data.Results = results
 	data.TreemapJSON = treemapJSON(results)
 	renderResults(w, data)
-}
-
-// saveUpload copies the "pprof" multipart field to a temp file, since
-// pprofstats.Top needs a filesystem path, not an io.Reader.
-func saveUpload(r *http.Request) (path string, cleanup func(), err error) {
-	file, _, err := r.FormFile("pprof")
-	if err != nil {
-		return "", nil, fmt.Errorf("read uploaded pprof file: %w", err)
-	}
-	defer file.Close()
-
-	tmp, err := os.CreateTemp("", "gosys-upload-*.pprof")
-	if err != nil {
-		return "", nil, fmt.Errorf("create temp file: %w", err)
-	}
-	if _, err := io.Copy(tmp, file); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return "", nil, fmt.Errorf("write temp file: %w", err)
-	}
-	tmp.Close()
-
-	return tmp.Name(), func() { os.Remove(tmp.Name()) }, nil
 }
 
 // fetchLiveProfile pulls a heap profile directly from a running Go
