@@ -44,6 +44,26 @@ func hasPattern(results []pipeline.Result, pattern string) bool {
 	return false
 }
 
+// hasPatternForFunc is like hasPattern but scoped to a single function name.
+// Needed because pipeline_test.go's fixtures share one process: an earlier
+// test's now-freed allocation sites can still show up as zero-byte entries
+// in a later test's captured profile (the runtime's profiling buckets are
+// process-lifetime), and an unscoped hasPattern check would false-positive
+// on that stale entry instead of the function actually under test.
+func hasPatternForFunc(results []pipeline.Result, fn, pattern string) bool {
+	for _, r := range results {
+		if r.Site.Function != fn {
+			continue
+		}
+		for _, f := range r.Findings {
+			if f.Pattern == pattern {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestSliceIntoStructField(t *testing.T) {
 	sliceleak.Run(2000)
 	profile := captureHeapProfile(t)
@@ -93,5 +113,29 @@ func TestAllocInLoopWithoutPool(t *testing.T) {
 	}
 	if !hasPattern(results, "alloc-in-loop-without-pool") {
 		t.Errorf("expected alloc-in-loop-without-pool finding, got results: %+v", results)
+	}
+}
+
+// TestAllocInLoopWithoutPool_FileScopePool guards against a false positive:
+// a sync.Pool declared at package level, used only via Get()/Put() in the
+// hot function, must still suppress the finding even though the literal
+// text "sync.Pool" never appears in that function's own source.
+func TestAllocInLoopWithoutPool_FileScopePool(t *testing.T) {
+	loopalloc.Sink = nil // avoid the previous test's still-live buffers polluting this profile
+	data := make([]byte, 4096)
+	loopalloc.RunPooled(2000, data)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/loopalloc",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/loopalloc.RunPooled"
+	if hasPatternForFunc(results, fn, "alloc-in-loop-without-pool") {
+		t.Errorf("expected no alloc-in-loop-without-pool finding for pooled code, got results: %+v", results)
 	}
 }

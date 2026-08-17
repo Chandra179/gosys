@@ -125,9 +125,9 @@ func MapPointerGrowth(idx *astsite.Index, path []ast.Node, site pprofstats.Site)
 }
 
 // AllocInLoopWithoutPool flags make([]byte, ...) or json.Unmarshal calls
-// that sit inside a for/range loop, in a function with no visible
-// sync.Pool usage. Per-iteration allocation of short-lived buffers is a
-// classic GC-pressure source that sync.Pool exists specifically to fix.
+// that sit inside a for/range loop, in a file with no visible sync.Pool
+// usage. Per-iteration allocation of short-lived buffers is a classic
+// GC-pressure source that sync.Pool exists specifically to fix.
 func AllocInLoopWithoutPool(idx *astsite.Index, path []ast.Node, site pprofstats.Site) *Finding {
 	call := findAllocCall(path)
 	if call == nil {
@@ -140,9 +140,14 @@ func AllocInLoopWithoutPool(idx *astsite.Index, path []ast.Node, site pprofstats
 	if fn == nil {
 		return nil
 	}
-	fnSrc, err := idx.NodeSource(fn)
-	if err == nil && strings.Contains(fnSrc, "sync.Pool") {
-		return nil // pool usage present somewhere in the function; don't flag
+	// Checked at file scope, not just the enclosing function: the common
+	// pooling pattern declares `var p = sync.Pool{...}` once at package
+	// level and only calls p.Get()/p.Put() inside the hot function, so a
+	// function-body-only check would false-positive on already-pooled code.
+	if file := findFile(path); file != nil {
+		if fileSrc, err := idx.NodeSource(file); err == nil && strings.Contains(fileSrc, "sync.Pool") {
+			return nil // pool usage present somewhere in the file; don't flag
+		}
 	}
 	callSrc, _ := idx.NodeSource(call)
 	return &Finding{

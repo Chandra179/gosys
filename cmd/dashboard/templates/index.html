@@ -7,33 +7,35 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body class="bg-white text-slate-900">
-  <main class="max-w-3xl mx-auto my-8 px-4">
-    <h1 class="text-2xl font-bold mb-6">gosys &mdash; pprof memory analyzer</h1>
+  <header class="border-b border-slate-200">
+    <div class="max-w-[1400px] mx-auto px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+      <h1 class="text-lg font-bold whitespace-nowrap">gosys</h1>
+      <form hx-post="/analyze" hx-target="#results" hx-swap="innerHTML"
+            class="flex flex-wrap items-end gap-3 flex-1">
+        <div class="flex-1 min-w-[220px]">
+          <label for="target" class="block text-xs font-semibold text-slate-500 mb-1">Live target (host:port)</label>
+          <input type="text" id="target" name="target" placeholder="localhost:6060" required
+                 class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
+        </div>
+        <div class="w-24">
+          <label for="top" class="block text-xs font-semibold text-slate-500 mb-1">Top N</label>
+          <input type="number" id="top" name="top" value="{{.Top}}" min="1"
+                 class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
+        </div>
+        <button type="submit" class="bg-slate-900 text-white px-4 py-1.5 rounded text-sm font-semibold h-[30px]">
+          Analyze
+        </button>
+      </form>
+    </div>
+    <p class="max-w-[1400px] mx-auto px-4 pb-2 text-xs text-slate-500">
+      Fetches <code>/debug/pprof/heap</code> directly from the target and runs it against this repo checkout.
+    </p>
+  </header>
 
-    <form hx-post="/analyze" hx-target="#results" hx-swap="innerHTML"
-          class="space-y-4 border border-slate-200 rounded-lg p-4">
-      <div>
-        <label for="target" class="block font-semibold text-sm mb-1">Live target (host:port)</label>
-        <input type="text" id="target" name="target" placeholder="localhost:6060" required
-               class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
-      </div>
-      <p class="text-xs text-slate-500 -mt-2">
-        Fetches <code>/debug/pprof/heap</code> directly from the target.
-      </p>
-      <div>
-        <label for="top" class="block font-semibold text-sm mb-1">Top N allocation sites</label>
-        <input type="number" id="top" name="top" value="{{.Top}}" min="1"
-               class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
-      </div>
-      <button type="submit" class="bg-slate-900 text-white px-4 py-2 rounded text-sm font-semibold">
-        Analyze
-      </button>
-    </form>
-
-    <div id="results" class="mt-6">
+  <main class="max-w-[1400px] mx-auto my-6 px-4">
+    <div id="results">
       {{template "results" .}}
     </div>
-
   </main>
 </body>
 </html>

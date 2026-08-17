@@ -53,6 +53,19 @@ func findEnclosingFunc(path []ast.Node) *ast.FuncDecl {
 	return nil
 }
 
+// findFile returns the *ast.File the path was resolved in.
+// astutil.PathEnclosingInterval always includes it as the outermost
+// (last) element of the path.
+func findFile(path []ast.Node) *ast.File {
+	if len(path) == 0 {
+		return nil
+	}
+	if f, ok := path[len(path)-1].(*ast.File); ok {
+		return f
+	}
+	return nil
+}
+
 func funcName(fn *ast.FuncDecl) string {
 	if fn.Name != nil {
 		return fn.Name.Name

@@ -5,15 +5,37 @@
   <p class="text-slate-500">no results</p>
 {{else}}
   <script type="application/json" id="treemap-data">{{.TreemapJSON}}</script>
-  <div class="border border-slate-200 rounded-lg p-3 mb-6 shadow-sm">
-    <div class="flex items-center gap-2 text-sm mb-2" id="tm-crumbs"></div>
-    <div class="flex justify-between font-mono text-xs text-slate-400 px-1 mb-2">
-      <span id="tm-meta-count"></span>
-      <span id="tm-meta-total"></span>
+
+  <div class="grid grid-cols-1 lg:grid-cols-[7fr_5fr] gap-6 items-start">
+    <div class="lg:sticky lg:top-4 border border-slate-200 rounded-lg p-3 shadow-sm">
+      <div class="flex items-center gap-2 text-sm mb-2" id="tm-crumbs"></div>
+      <div class="flex justify-between font-mono text-xs text-slate-400 px-1 mb-2">
+        <span id="tm-meta-count"></span>
+        <span id="tm-meta-total"></span>
+      </div>
+      <svg id="treemap" viewBox="0 0 900 460" class="w-full h-auto rounded"></svg>
+      <p class="text-xs text-slate-500 mt-2" id="tm-subtitle"></p>
+      <div class="flex gap-4 text-xs text-slate-500 mt-2" id="tm-legend"></div>
     </div>
-    <svg id="treemap" viewBox="0 0 900 460" class="w-full h-auto rounded"></svg>
-    <p class="text-xs text-slate-500 mt-2" id="tm-subtitle"></p>
-    <div class="flex gap-4 text-xs text-slate-500 mt-2" id="tm-legend"></div>
+
+    <div id="findings-list" class="space-y-4 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1">
+      {{range .Results}}
+        <div class="border border-slate-200 rounded-lg p-4 shadow-sm transition-shadow" data-site="{{.Site.File}}:{{.Site.Line}}">
+          <h3 class="font-mono text-sm text-slate-700">{{.Site.File}}:{{.Site.Line}} &mdash; {{.Site.Flat}} bytes ({{.Site.Function}})</h3>
+          {{if .Findings}}
+            {{range .Findings}}
+              <div class="border-l-4 border-amber-500 pl-3 mt-3">
+                <div class="font-semibold text-amber-700">{{.Pattern}}</div>
+                <p class="text-sm text-slate-700 mt-1">{{.Message}}</p>
+                {{if .Source}}<pre class="bg-slate-50 text-sm p-2 mt-2 rounded overflow-x-auto">{{.Source}}</pre>{{end}}
+              </div>
+            {{end}}
+          {{else}}
+            <p class="text-slate-400 text-sm mt-2">no known anti-pattern matched</p>
+          {{end}}
+        </div>
+      {{end}}
+    </div>
   </div>
 
   <script>
@@ -231,32 +253,35 @@
       }
     }
 
+    var highlightedCard = null;
+
+    // findCard uses an attribute-value scan rather than a CSS selector so
+    // file paths with slashes/colons never need escaping.
+    function findCard(key) {
+      var cards = document.querySelectorAll("#findings-list [data-site]");
+      for (var i = 0; i < cards.length; i++) {
+        if (cards[i].getAttribute("data-site") === key) return cards[i];
+      }
+      return null;
+    }
+
     function selectTile(n, el) {
       if (selectedEl) selectedEl.setAttribute("stroke-width", "1.5");
       el.setAttribute("stroke", "#0f172a");
       el.setAttribute("stroke-width", "2.5");
       selectedEl = el;
+
+      if (highlightedCard) highlightedCard.classList.remove("ring-2", "ring-slate-900");
+      var card = findCard(n.file + ":" + n.line);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("ring-2", "ring-slate-900");
+        highlightedCard = card;
+      }
     }
 
     render();
   })();
   </script>
-
-  {{range .Results}}
-    <div class="border border-slate-200 rounded-lg p-4 mb-4 shadow-sm">
-      <h3 class="font-mono text-sm text-slate-700">{{.Site.File}}:{{.Site.Line}} &mdash; {{.Site.Flat}} bytes ({{.Site.Function}})</h3>
-      {{if .Findings}}
-        {{range .Findings}}
-          <div class="border-l-4 border-amber-500 pl-3 mt-3">
-            <div class="font-semibold text-amber-700">{{.Pattern}}</div>
-            <p class="text-sm text-slate-700 mt-1">{{.Message}}</p>
-            {{if .Source}}<pre class="bg-slate-50 text-sm p-2 mt-2 rounded overflow-x-auto">{{.Source}}</pre>{{end}}
-          </div>
-        {{end}}
-      {{else}}
-        <p class="text-slate-400 text-sm mt-2">no known anti-pattern matched</p>
-      {{end}}
-    </div>
-  {{end}}
 {{end}}
 {{end}}
