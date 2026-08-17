@@ -5,6 +5,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -12,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"gosys/internal/pipeline"
 )
@@ -22,10 +24,59 @@ var templatesFS embed.FS
 var tmpl = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 
 type pageData struct {
-	RepoDir string
-	Top     int
-	Results []pipeline.Result
-	Err     string
+	RepoDir     string
+	Top         int
+	Results     []pipeline.Result
+	Err         string
+	TreemapJSON template.JS
+}
+
+// treemapItem is one allocation site flattened for the client-side treemap:
+// one entry per Result, with any matched findings collapsed onto it since
+// the treemap groups by site, not by individual finding.
+type treemapItem struct {
+	File    string `json:"file"`
+	Line    int64  `json:"line"`
+	Fn      string `json:"fn"`
+	Bytes   int64  `json:"bytes"`
+	Pattern string `json:"pattern"` // "" if no rule matched
+	Message string `json:"message"`
+	Source  string `json:"source"`
+}
+
+// treemapJSON flattens results into the shape the dashboard's treemap script
+// expects and marshals it for embedding in an `application/json` data
+// island. json.Marshal HTML-escapes <, >, and & by default, which is what
+// makes it safe to inline as template.JS without a script-breakout risk.
+func treemapJSON(results []pipeline.Result) template.JS {
+	items := make([]treemapItem, 0, len(results))
+	for _, r := range results {
+		item := treemapItem{
+			File:  r.Site.File,
+			Line:  r.Site.Line,
+			Fn:    r.Site.Function,
+			Bytes: r.Site.Flat,
+		}
+		if len(r.Findings) > 0 {
+			patterns := make([]string, len(r.Findings))
+			messages := make([]string, len(r.Findings))
+			for i, f := range r.Findings {
+				patterns[i] = f.Pattern
+				messages[i] = f.Message
+			}
+			item.Pattern = strings.Join(patterns, ", ")
+			item.Message = strings.Join(messages, " ")
+			item.Source = r.Findings[0].Source
+		}
+		items = append(items, item)
+	}
+
+	b, err := json.Marshal(items)
+	if err != nil {
+		log.Println("marshal treemap json:", err)
+		return template.JS("[]")
+	}
+	return template.JS(b)
 }
 
 func main() {
@@ -44,7 +95,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	renderPage(w, pageData{RepoDir: ".", Top: 10})
+	renderPage(w, pageData{RepoDir: ".", Top: 10, TreemapJSON: treemapJSON(nil)})
 }
 
 func handleAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +132,7 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data.Results = results
+	data.TreemapJSON = treemapJSON(results)
 	renderResults(w, data)
 }
 

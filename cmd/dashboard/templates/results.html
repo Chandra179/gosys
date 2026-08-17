@@ -4,6 +4,244 @@
 {{else if not .Results}}
   <p class="text-slate-500">no results</p>
 {{else}}
+  <script type="application/json" id="treemap-data">{{.TreemapJSON}}</script>
+  <div class="border border-slate-200 rounded-lg p-3 mb-6 shadow-sm">
+    <div class="flex items-center gap-2 text-sm mb-2" id="tm-crumbs"></div>
+    <div class="flex justify-between font-mono text-xs text-slate-400 px-1 mb-2">
+      <span id="tm-meta-count"></span>
+      <span id="tm-meta-total"></span>
+    </div>
+    <svg id="treemap" viewBox="0 0 900 460" class="w-full h-auto rounded"></svg>
+    <p class="text-xs text-slate-500 mt-2" id="tm-subtitle"></p>
+    <div class="flex gap-4 text-xs text-slate-500 mt-2" id="tm-legend"></div>
+  </div>
+
+  <script>
+  (function () {
+    var sites = JSON.parse(document.getElementById("treemap-data").textContent);
+    if (!sites.length) return;
+
+    function fmtBytes(n) {
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + " MB";
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + " KB";
+      return n + " B";
+    }
+
+    function packageOf(file) {
+      var parts = file.split("/");
+      return parts.length > 1 ? parts.slice(0, -1).join("/") : "(root)";
+    }
+
+    function computePackages() {
+      var groups = new Map();
+      sites.forEach(function (s) {
+        var key = packageOf(s.file);
+        if (!groups.has(key)) groups.set(key, { key: key, isPackage: true, bytes: 0, count: 0, flagged: 0, items: [] });
+        var g = groups.get(key);
+        g.bytes += s.bytes;
+        g.count += 1;
+        if (s.pattern) g.flagged += 1;
+        g.items.push(s);
+      });
+      return Array.from(groups.values());
+    }
+
+    // Squarified treemap layout (Bruls et al.).
+    function squarify(items, x, y, w, h) {
+      var nodes = [];
+      var data = items.slice().sort(function (a, b) { return b.bytes - a.bytes; });
+      var total = data.reduce(function (s, d) { return s + d.bytes; }, 0) || 1;
+      var area = w * h;
+      var scaled = data.map(function (d) {
+        var copy = Object.assign({}, d);
+        copy.a = (d.bytes / total) * area;
+        return copy;
+      });
+
+      var rectX = x, rectY = y, rectW = w, rectH = h, i = 0;
+      while (i < scaled.length) {
+        var shortSide = Math.min(rectW, rectH);
+        var row = [scaled[i]];
+        var rowArea = scaled[i].a;
+        var bestRatio = worstRatio(row, shortSide);
+        var j = i + 1;
+        while (j < scaled.length) {
+          var testRow = row.concat([scaled[j]]);
+          var testArea = rowArea + scaled[j].a;
+          var ratio = worstRatio(testRow, shortSide, testArea);
+          if (ratio <= bestRatio) { row = testRow; rowArea = testArea; bestRatio = ratio; j++; } else break;
+        }
+
+        var rowLenFrac = rowArea / (rectW * rectH);
+        if (rectW >= rectH) {
+          var rowW = rectW * rowLenFrac, cy = rectY;
+          row.forEach(function (d) {
+            var itemH = (d.a / rowArea) * rectH;
+            nodes.push(Object.assign({}, d, { x: rectX, y: cy, w: rowW, h: itemH }));
+            cy += itemH;
+          });
+          rectX += rowW; rectW -= rowW;
+        } else {
+          var rowH = rectH * rowLenFrac, cx = rectX;
+          row.forEach(function (d) {
+            var itemW = (d.a / rowArea) * rectW;
+            nodes.push(Object.assign({}, d, { x: cx, y: rectY, w: itemW, h: rowH }));
+            cx += itemW;
+          });
+          rectY += rowH; rectH -= rowH;
+        }
+        i = j;
+      }
+      return nodes;
+
+      function worstRatio(row, side, areaOverride) {
+        var sum = areaOverride || row.reduce(function (s, d) { return s + d.a; }, 0);
+        var maxA = Math.max.apply(null, row.map(function (d) { return d.a; }));
+        var minA = Math.min.apply(null, row.map(function (d) { return d.a; }));
+        var sideSq = side * side;
+        return Math.max((sideSq * maxA) / (sum * sum), (sum * sum) / (sideSq * minA));
+      }
+    }
+
+    var packages = computePackages();
+    var totalBytes = sites.reduce(function (s, d) { return s + d.bytes; }, 0) || 1;
+    var maxSiteBytes = Math.max.apply(null, sites.map(function (s) { return s.bytes; }));
+
+    function colorForSite(d) {
+      if (!d.pattern) return "#e2e8f0";
+      var t = d.bytes / maxSiteBytes;
+      if (t > 0.55) return "#b45309";
+      if (t > 0.22) return "#f59e0b";
+      return "#fde68a";
+    }
+    function colorForPackage(g) {
+      var frac = g.flagged / g.count;
+      if (frac === 0) return "#e2e8f0";
+      if (frac > 0.6) return "#b45309";
+      if (frac > 0.25) return "#f59e0b";
+      return "#fde68a";
+    }
+    function textColorFor(hasSignal) { return hasSignal ? "#451a03" : "#334155"; }
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    var svg = document.getElementById("treemap");
+    var W = 900, H = 460;
+    var currentPackage = null;
+    var selectedEl = null;
+
+    function render() {
+      svg.innerHTML = "";
+      selectedEl = null;
+
+      var items = currentPackage ? currentPackage.items : packages;
+      var nodes = squarify(items, 0, 0, W, H);
+      var isRoot = !currentPackage;
+
+      nodes.forEach(function (n) {
+        var g = document.createElementNS(svgNS, "g");
+        var rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", n.x);
+        rect.setAttribute("y", n.y);
+        rect.setAttribute("width", Math.max(0, n.w));
+        rect.setAttribute("height", Math.max(0, n.h));
+        rect.setAttribute("fill", isRoot ? colorForPackage(n) : colorForSite(n));
+        rect.setAttribute("stroke", "#fff");
+        rect.setAttribute("stroke-width", "1.5");
+        rect.style.cursor = "pointer";
+        rect.setAttribute("tabindex", "0");
+        g.appendChild(rect);
+
+        var hasSignal = isRoot ? n.flagged > 0 : !!n.pattern;
+        if (n.w > 70 && n.h > 30) {
+          var label = document.createElementNS(svgNS, "text");
+          label.setAttribute("x", n.x + 8);
+          label.setAttribute("y", n.y + 18);
+          label.setAttribute("fill", textColorFor(hasSignal));
+          label.setAttribute("font-family", "ui-monospace, SFMono-Regular, Consolas, monospace");
+          label.style.pointerEvents = "none";
+          var rawName = isRoot ? n.key : n.fn;
+          var maxChars = Math.floor(n.w / 7);
+          var name = rawName.length > maxChars ? rawName.slice(0, maxChars - 1) + "…" : rawName;
+          var tspan1 = document.createElementNS(svgNS, "tspan");
+          tspan1.setAttribute("font-size", "12");
+          tspan1.setAttribute("font-weight", "600");
+          tspan1.textContent = name;
+          label.appendChild(tspan1);
+          if (n.h > 46) {
+            var tspan2 = document.createElementNS(svgNS, "tspan");
+            tspan2.setAttribute("x", n.x + 8);
+            tspan2.setAttribute("y", n.y + 34);
+            tspan2.setAttribute("font-size", "10.5");
+            tspan2.textContent = isRoot
+              ? fmtBytes(n.bytes) + " · " + n.count + " sites · " + n.flagged + " flagged"
+              : fmtBytes(n.bytes);
+            label.appendChild(tspan2);
+          }
+          g.appendChild(label);
+        }
+
+        var activate = function () { isRoot ? drillInto(n) : selectTile(n, rect); };
+        rect.addEventListener("click", activate);
+        rect.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+        });
+
+        svg.appendChild(g);
+      });
+
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+
+      var shownBytes = items.reduce(function (s, d) { return s + d.bytes; }, 0);
+      document.getElementById("tm-meta-count").textContent = isRoot ? packages.length + " packages" : items.length + " sites";
+      document.getElementById("tm-meta-total").textContent = fmtBytes(shownBytes) + (isRoot ? " total flat" : " in this package");
+      document.getElementById("tm-subtitle").textContent = isRoot
+        ? "Packages, sized by total flat bytes. Click one to drill into its allocation sites."
+        : "Sites within " + currentPackage.key + ", sized by flat bytes. Color marks whether a gosys rule matched.";
+      document.getElementById("tm-legend").innerHTML = isRoot
+        ? '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0"></span>0% flagged</div>'
+        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a"></span>partly flagged</div>'
+        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309"></span>mostly flagged</div>'
+        : '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0"></span>no pattern matched</div>'
+        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a"></span>flagged &middot; small</div>'
+        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309"></span>flagged &middot; large</div>';
+
+      renderCrumbs();
+    }
+
+    function drillInto(pkg) { currentPackage = pkg; render(); }
+
+    function renderCrumbs() {
+      var el = document.getElementById("tm-crumbs");
+      el.innerHTML = "";
+      var root = document.createElement("button");
+      root.type = "button";
+      root.textContent = "All packages";
+      root.className = "font-mono " + (currentPackage ? "text-blue-600 hover:underline" : "text-slate-900");
+      if (currentPackage) root.addEventListener("click", function () { currentPackage = null; render(); });
+      el.appendChild(root);
+      if (currentPackage) {
+        var sep = document.createElement("span");
+        sep.className = "text-slate-400";
+        sep.textContent = "/";
+        var cur = document.createElement("span");
+        cur.className = "font-mono text-slate-900";
+        cur.textContent = currentPackage.key;
+        el.appendChild(sep);
+        el.appendChild(cur);
+      }
+    }
+
+    function selectTile(n, el) {
+      if (selectedEl) selectedEl.setAttribute("stroke-width", "1.5");
+      el.setAttribute("stroke", "#0f172a");
+      el.setAttribute("stroke-width", "2.5");
+      selectedEl = el;
+    }
+
+    render();
+  })();
+  </script>
+
   {{range .Results}}
     <div class="border border-slate-200 rounded-lg p-4 mb-4 shadow-sm">
       <h3 class="font-mono text-sm text-slate-700">{{.Site.File}}:{{.Site.Line}} &mdash; {{.Site.Flat}} bytes ({{.Site.Function}})</h3>
