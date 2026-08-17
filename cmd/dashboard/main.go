@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	_ "net/http/pprof" // registers /debug/pprof/* on the default mux, incl. /debug/pprof/heap
 	"os"
 	"strings"
 	"time"
