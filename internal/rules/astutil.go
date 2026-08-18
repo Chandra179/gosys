@@ -3,6 +3,7 @@ package rules
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 )
 
 func findAssign(path []ast.Node) *ast.AssignStmt {
@@ -159,6 +160,87 @@ func fileUsesSyncPool(file *ast.File) bool {
 		return true
 	})
 	return found
+}
+
+// findStringConv locates a string(x) conversion call responsible for the
+// hot line, the same way findAllocCall locates make(...)/json.Unmarshal:
+// check ancestors first, then walk into the innermost statement's subtree.
+func findStringConv(path []ast.Node) *ast.CallExpr {
+	for _, n := range path {
+		if c, ok := n.(*ast.CallExpr); ok && isStringConv(c) {
+			return c
+		}
+	}
+	if len(path) == 0 {
+		return nil
+	}
+	var found *ast.CallExpr
+	ast.Inspect(path[0], func(n ast.Node) bool {
+		if found != nil {
+			return false
+		}
+		if c, ok := n.(*ast.CallExpr); ok && isStringConv(c) {
+			found = c
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func isStringConv(call *ast.CallExpr) bool {
+	id, ok := call.Fun.(*ast.Ident)
+	return ok && id.Name == "string" && len(call.Args) == 1
+}
+
+// isByteSlice reports whether t is a []byte (or a named type whose
+// underlying type is []byte).
+func isByteSlice(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	slice, ok := t.Underlying().(*types.Slice)
+	if !ok {
+		return false
+	}
+	basic, ok := slice.Elem().Underlying().(*types.Basic)
+	return ok && basic.Kind() == types.Uint8
+}
+
+// findEnclosingRange returns the innermost *ast.RangeStmt in path, if any.
+func findEnclosingRange(path []ast.Node) *ast.RangeStmt {
+	for _, n := range path {
+		if r, ok := n.(*ast.RangeStmt); ok {
+			return r
+		}
+	}
+	return nil
+}
+
+// rangeValueAddressTaken reports whether rs's per-iteration value variable
+// has its address taken (&v) anywhere in the loop body, and if so returns
+// the value's name and the &v expression.
+func rangeValueAddressTaken(rs *ast.RangeStmt) (name string, expr *ast.UnaryExpr, found bool) {
+	val, ok := rs.Value.(*ast.Ident)
+	if !ok || val.Name == "_" {
+		return "", nil, false
+	}
+	ast.Inspect(rs.Body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		u, ok := n.(*ast.UnaryExpr)
+		if !ok || u.Op != token.AND {
+			return true
+		}
+		if id, ok := u.X.(*ast.Ident); ok && id.Name == val.Name {
+			expr = u
+			found = true
+			return false
+		}
+		return true
+	})
+	return val.Name, expr, found
 }
 
 // isAllocCall reports whether call is make([]byte, ...) or a call to

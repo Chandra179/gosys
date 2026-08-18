@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"gosys/internal/pipeline"
+	"gosys/testdata/fixtures/bytesconv"
 	"gosys/testdata/fixtures/loopalloc"
 	"gosys/testdata/fixtures/mapgrowth"
+	"gosys/testdata/fixtures/rangeescape"
 	"gosys/testdata/fixtures/sliceleak"
 	"gosys/testdata/fixtures/strconcat"
 )
@@ -200,5 +202,41 @@ func TestStringConcatInLoop(t *testing.T) {
 	}
 	if !hasPattern(results, "string-concat-in-loop") {
 		t.Errorf("expected string-concat-in-loop finding, got results: %+v", results)
+	}
+}
+
+func TestBytesToStringInLoop(t *testing.T) {
+	b := make([]byte, 4096)
+	bytesconv.Run(2000, b)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/bytesconv",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if !hasPattern(results, "bytes-to-string-in-loop") {
+		t.Errorf("expected bytes-to-string-in-loop finding, got results: %+v", results)
+	}
+}
+
+func TestRangeValueEscape(t *testing.T) {
+	items := make([]rangeescape.Big, 1000)
+	rangeescape.Run(items)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/rangeescape",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if !hasPattern(results, "range-value-escape") {
+		t.Errorf("expected range-value-escape finding, got results: %+v", results)
 	}
 }

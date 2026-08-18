@@ -9,7 +9,8 @@
 //
 // Each rule lives in its own file (slice_into_struct_field.go,
 // map_pointer_growth.go, alloc_in_loop_without_pool.go,
-// string_concat_in_loop.go); this file only holds the shared Finding/Rule
+// string_concat_in_loop.go, bytes_to_string_in_loop.go,
+// range_value_escape.go); this file only holds the shared Finding/Rule
 // types and the All/Run entry points. AST helpers shared across rule files
 // live in astutil.go.
 package rules
@@ -39,6 +40,8 @@ var All = []Rule{
 	MapPointerGrowth,
 	AllocInLoopWithoutPool,
 	StringConcatInLoop,
+	BytesToStringInLoop,
+	RangeValueEscape,
 }
 
 // Run applies every rule in All to the given site and returns all matches

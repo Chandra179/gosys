@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,15 +20,18 @@ import (
 // by the absolute source file path.
 type Index struct {
 	Fset  *token.FileSet
-	files map[string]*ast.File // absolute path -> file
+	files map[string]*ast.File      // absolute path -> file
+	info  map[*ast.File]*types.Info // file -> its package's type info
 }
 
-// Load parses every package under repoDir (via "./...") and returns an
-// Index that can resolve pprof source locations against it.
+// Load parses and type-checks every package under repoDir (via "./...")
+// and returns an Index that can resolve pprof source locations against it.
 func Load(repoDir string) (*Index, error) {
 	fset := token.NewFileSet()
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedCompiledGoFiles,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedDeps | packages.NeedSyntax |
+			packages.NeedTypes | packages.NeedTypesInfo,
 		Dir:  repoDir,
 		Fset: fset,
 	}
@@ -36,7 +40,7 @@ func Load(repoDir string) (*Index, error) {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 
-	idx := &Index{Fset: fset, files: make(map[string]*ast.File)}
+	idx := &Index{Fset: fset, files: make(map[string]*ast.File), info: make(map[*ast.File]*types.Info)}
 	for _, pkg := range pkgs {
 		for _, f := range pkg.Syntax {
 			pos := fset.Position(f.Pos())
@@ -48,9 +52,23 @@ func Load(repoDir string) (*Index, error) {
 				abs = pos.Filename
 			}
 			idx.files[abs] = f
+			if pkg.TypesInfo != nil {
+				idx.info[f] = pkg.TypesInfo
+			}
 		}
 	}
 	return idx, nil
+}
+
+// TypeOf returns the type of expr as determined by the type checker, or nil
+// if type information isn't available (e.g. its package failed to
+// type-check, or file wasn't loaded by this Index).
+func (idx *Index) TypeOf(file *ast.File, expr ast.Expr) types.Type {
+	info, ok := idx.info[file]
+	if !ok {
+		return nil
+	}
+	return info.TypeOf(expr)
 }
 
 // PathAt resolves the pprof-reported file/line to the enclosing AST node
