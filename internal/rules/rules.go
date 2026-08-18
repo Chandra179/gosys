@@ -12,7 +12,10 @@
 // string_concat_in_loop.go, bytes_to_string_in_loop.go,
 // range_value_escape.go, pointer_escape_return.go); this file only holds
 // the shared Finding/Rule types and the All/Run entry points. AST helpers
-// shared across rule files live in astutil.go.
+// are split by concern rather than dumped in one file: generic path/node
+// navigation lives in astutil.go, and alloc_helpers.go, pointer_helpers.go,
+// pool_helpers.go, conv_helpers.go, range_helpers.go each hold the helpers
+// specific to one rule family.
 package rules
 
 import (
