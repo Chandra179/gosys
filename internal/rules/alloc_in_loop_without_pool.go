@@ -29,10 +29,10 @@ func AllocInLoopWithoutPool(idx *astsite.Index, path []ast.Node, site pprofstats
 	// pooling pattern declares `var p = sync.Pool{...}` once at package
 	// level and only calls p.Get()/p.Put() inside the hot function, so a
 	// function-body-only check would false-positive on already-pooled code.
-	if file := findFile(path); file != nil {
-		if fileSrc, err := idx.NodeSource(file); err == nil && strings.Contains(fileSrc, "sync.Pool") {
-			return nil // pool usage present somewhere in the file; don't flag
-		}
+	// AST-based (fileUsesSyncPool), not a source-text search, so a comment
+	// that merely mentions "sync.Pool" can't suppress a real finding.
+	if file := findFile(path); file != nil && fileUsesSyncPool(file) {
+		return nil // pool usage present somewhere in the file; don't flag
 	}
 	callSrc, _ := idx.NodeSource(call)
 	return &Finding{

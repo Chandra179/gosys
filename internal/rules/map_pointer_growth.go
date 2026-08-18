@@ -18,6 +18,7 @@ func MapPointerGrowth(idx *astsite.Index, path []ast.Node, site pprofstats.Site)
 	if assign == nil {
 		return nil
 	}
+	fn := findEnclosingFunc(path)
 	for i, lhs := range assign.Lhs {
 		if i >= len(assign.Rhs) {
 			break
@@ -26,7 +27,7 @@ func MapPointerGrowth(idx *astsite.Index, path []ast.Node, site pprofstats.Site)
 		if !ok {
 			continue
 		}
-		if !isPointerProducing(assign.Rhs[i]) {
+		if !isPointerProducing(assign.Rhs[i], fn) {
 			continue
 		}
 		src, _ := idx.NodeSource(assign)

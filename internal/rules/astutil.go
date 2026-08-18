@@ -83,9 +83,11 @@ func insideLoop(path []ast.Node) bool {
 	return false
 }
 
-// isPointerProducing reports whether expr syntactically looks like it
-// produces a pointer: &x, or a call to new(...).
-func isPointerProducing(expr ast.Expr) bool {
+// isPointerProducing reports whether expr looks like it produces a pointer:
+// &x, a call to new(...), or an identifier that was itself assigned one of
+// those earlier in fn (e.g. `p := &Value{}` followed by `m[k] = p`). fn may
+// be nil, in which case only the direct &x/new(...) forms are recognized.
+func isPointerProducing(expr ast.Expr, fn *ast.FuncDecl) bool {
 	switch e := expr.(type) {
 	case *ast.UnaryExpr:
 		return e.Op == token.AND
@@ -93,8 +95,70 @@ func isPointerProducing(expr ast.Expr) bool {
 		if id, ok := e.Fun.(*ast.Ident); ok {
 			return id.Name == "new"
 		}
+	case *ast.Ident:
+		return fn != nil && identAssignedPointer(fn, e.Name)
 	}
 	return false
+}
+
+// identAssignedPointer reports whether name is assigned a &x or new(...)
+// value somewhere in fn's body.
+func identAssignedPointer(fn *ast.FuncDecl, name string) bool {
+	if fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			id, ok := lhs.(*ast.Ident)
+			if !ok || id.Name != name || i >= len(assign.Rhs) {
+				continue
+			}
+			// Only check the direct &x/new(...) forms here, not another
+			// level of identifier indirection, to keep this a bounded,
+			// single-hop trace rather than a full dataflow analysis.
+			switch rhs := assign.Rhs[i].(type) {
+			case *ast.UnaryExpr:
+				found = rhs.Op == token.AND
+			case *ast.CallExpr:
+				if fid, ok := rhs.Fun.(*ast.Ident); ok && fid.Name == "new" {
+					found = true
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// fileUsesSyncPool reports whether file references sync.Pool anywhere in
+// its syntax tree (declarations, composite literals, field types, etc.).
+// AST-based rather than a raw substring search over the file's source, so
+// a comment that merely mentions "sync.Pool" doesn't count.
+func fileUsesSyncPool(file *ast.File) bool {
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := sel.X.(*ast.Ident); ok && id.Name == "sync" && sel.Sel.Name == "Pool" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // isAllocCall reports whether call is make([]byte, ...) or a call to

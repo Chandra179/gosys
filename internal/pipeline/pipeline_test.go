@@ -99,6 +99,28 @@ func TestMapPointerGrowth(t *testing.T) {
 	}
 }
 
+// TestMapPointerGrowth_Indirect guards against a false negative: a pointer
+// stored via an intermediate local variable (`v := &Value{}; Cache[i] = v`)
+// must still be flagged, not just the literal `Cache[i] = &Value{}` form.
+func TestMapPointerGrowth_Indirect(t *testing.T) {
+	mapgrowth.IndirectCache = map[int]*mapgrowth.Small{}
+	mapgrowth.RunIndirect(200000)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/mapgrowth",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/mapgrowth.RunIndirect"
+	if !hasPatternForFunc(results, fn, "map-pointer-growth") {
+		t.Errorf("expected map-pointer-growth finding for RunIndirect, got results: %+v", results)
+	}
+}
+
 func TestAllocInLoopWithoutPool(t *testing.T) {
 	data := make([]byte, 4096)
 	loopalloc.Run(2000, data)
@@ -138,6 +160,29 @@ func TestAllocInLoopWithoutPool_FileScopePool(t *testing.T) {
 	const fn = "gosys/testdata/fixtures/loopalloc.RunPooled"
 	if hasPatternForFunc(results, fn, "alloc-in-loop-without-pool") {
 		t.Errorf("expected no alloc-in-loop-without-pool finding for pooled code, got results: %+v", results)
+	}
+}
+
+// TestAllocInLoopWithoutPool_CommentOnly guards against a false negative:
+// a file that merely mentions "sync.Pool" in a comment, without an actual
+// sync.Pool reference anywhere in its syntax, must still be flagged.
+func TestAllocInLoopWithoutPool_CommentOnly(t *testing.T) {
+	loopalloc.Sink = nil
+	data := make([]byte, 4096)
+	loopalloc.RunCommentOnly(2000, data)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/loopalloc",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/loopalloc.RunCommentOnly"
+	if !hasPatternForFunc(results, fn, "alloc-in-loop-without-pool") {
+		t.Errorf("expected alloc-in-loop-without-pool finding for RunCommentOnly, got results: %+v", results)
 	}
 }
 
