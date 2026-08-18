@@ -32,14 +32,19 @@ func Analyze(cfg Config) ([]Result, error) {
 		cfg.Top = 10
 	}
 
-	sites, err := pprofstats.Top(cfg.ProfilePath, cfg.Top)
-	if err != nil {
-		return nil, fmt.Errorf("read profile: %w", err)
-	}
-
 	idx, err := astsite.Load(cfg.RepoDir)
 	if err != nil {
 		return nil, fmt.Errorf("load repo: %w", err)
+	}
+
+	resolvable := func(file string, line int64) bool {
+		_, _, ok := idx.PathAt(file, line)
+		return ok
+	}
+
+	sites, err := pprofstats.Top(cfg.ProfilePath, cfg.Top, resolvable)
+	if err != nil {
+		return nil, fmt.Errorf("read profile: %w", err)
 	}
 
 	results := make([]Result, 0, len(sites))
