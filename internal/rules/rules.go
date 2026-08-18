@@ -10,12 +10,13 @@
 // Each rule lives in its own file (slice_into_struct_field.go,
 // map_pointer_growth.go, alloc_in_loop_without_pool.go,
 // string_concat_in_loop.go, bytes_to_string_in_loop.go,
-// range_value_escape.go, pointer_escape_return.go); this file only holds
-// the shared Finding/Rule types and the All/Run entry points. AST helpers
-// are split by concern rather than dumped in one file: generic path/node
-// navigation lives in astutil.go, and alloc_helpers.go, pointer_helpers.go,
-// pool_helpers.go, conv_helpers.go, range_helpers.go each hold the helpers
-// specific to one rule family.
+// range_value_escape.go, pointer_escape_return.go,
+// closure_capture.go); this file only holds the shared Finding/Rule types
+// and the All/Run entry points. AST helpers are split by concern rather
+// than dumped in one file: generic path/node navigation lives in
+// astutil.go, and alloc_helpers.go, pointer_helpers.go, pool_helpers.go,
+// conv_helpers.go, range_helpers.go, closure_helpers.go each hold the
+// helpers specific to one rule family.
 package rules
 
 import (
@@ -46,6 +47,7 @@ var All = []Rule{
 	BytesToStringInLoop,
 	RangeValueEscape,
 	PointerEscapeReturn,
+	ClosureCapture,
 }
 
 // Run applies every rule in All to the given site and returns all matches

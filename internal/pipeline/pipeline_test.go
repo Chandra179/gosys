@@ -9,6 +9,7 @@ import (
 
 	"gosys/internal/pipeline"
 	"gosys/testdata/fixtures/bytesconv"
+	"gosys/testdata/fixtures/closurecap"
 	"gosys/testdata/fixtures/loopalloc"
 	"gosys/testdata/fixtures/mapgrowth"
 	"gosys/testdata/fixtures/ptrescape"
@@ -279,5 +280,50 @@ func TestPointerEscapeReturn_Indirect(t *testing.T) {
 	const fn = "gosys/testdata/fixtures/ptrescape.newBigIndirect"
 	if !hasPatternForFunc(results, fn, "pointer-escape-return") {
 		t.Errorf("expected pointer-escape-return finding for newBigIndirect, got results: %+v", results)
+	}
+}
+
+// TestClosureCapture_Loop covers the shape where the closure is declared
+// inside a loop: pprof attributes the allocation to the closure literal's
+// own declaration line.
+func TestClosureCapture_Loop(t *testing.T) {
+	closurecap.Sink = nil
+	closurecap.RunLoop(2000)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/closurecap",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/closurecap.RunLoop"
+	if !hasPatternForFunc(results, fn, "closure-capture-escape") {
+		t.Errorf("expected closure-capture-escape finding for RunLoop, got results: %+v", results)
+	}
+}
+
+// TestClosureCapture_Single covers the shape where the closure is declared
+// once per call, with no enclosing loop: pprof attributes the allocation
+// to the escape statement's line (the append into the package-level Sink)
+// instead of the closure literal's own line.
+func TestClosureCapture_Single(t *testing.T) {
+	closurecap.Sink = nil
+	closurecap.RunSingleMany(2000)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/closurecap",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/closurecap.RunSingle"
+	if !hasPatternForFunc(results, fn, "closure-capture-escape") {
+		t.Errorf("expected closure-capture-escape finding for RunSingle, got results: %+v", results)
 	}
 }
