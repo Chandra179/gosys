@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"gosys/internal/astsite"
 	"gosys/internal/pprofstats"
 	"gosys/internal/rules"
 )
@@ -32,7 +31,7 @@ func Analyze(cfg Config) ([]Result, error) {
 		cfg.Top = 10
 	}
 
-	idx, err := astsite.Load(cfg.RepoDir)
+	idx, err := loadIndex(cfg.RepoDir)
 	if err != nil {
 		return nil, fmt.Errorf("load repo: %w", err)
 	}
