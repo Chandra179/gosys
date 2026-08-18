@@ -11,6 +11,7 @@ import (
 	"gosys/testdata/fixtures/bytesconv"
 	"gosys/testdata/fixtures/loopalloc"
 	"gosys/testdata/fixtures/mapgrowth"
+	"gosys/testdata/fixtures/ptrescape"
 	"gosys/testdata/fixtures/rangeescape"
 	"gosys/testdata/fixtures/sliceleak"
 	"gosys/testdata/fixtures/strconcat"
@@ -238,5 +239,45 @@ func TestRangeValueEscape(t *testing.T) {
 	}
 	if !hasPattern(results, "range-value-escape") {
 		t.Errorf("expected range-value-escape finding, got results: %+v", results)
+	}
+}
+
+func TestPointerEscapeReturn(t *testing.T) {
+	ptrescape.Sink = nil
+	ptrescape.Run(2000)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/ptrescape",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	if !hasPattern(results, "pointer-escape-return") {
+		t.Errorf("expected pointer-escape-return finding, got results: %+v", results)
+	}
+}
+
+// TestPointerEscapeReturn_Indirect guards against a false negative: the
+// single-hop indirect shape (`v := &Struct{}; return v`) must be flagged
+// too, not just the literal `return &Struct{}` form.
+func TestPointerEscapeReturn_Indirect(t *testing.T) {
+	ptrescape.Sink = nil
+	ptrescape.RunIndirect(2000)
+	profile := captureHeapProfile(t)
+
+	results, err := pipeline.Analyze(pipeline.Config{
+		ProfilePath: profile,
+		RepoDir:     "../../testdata/fixtures/ptrescape",
+		Top:         20,
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	const fn = "gosys/testdata/fixtures/ptrescape.newBigIndirect"
+	if !hasPatternForFunc(results, fn, "pointer-escape-return") {
+		t.Errorf("expected pointer-escape-return finding for newBigIndirect, got results: %+v", results)
 	}
 }
