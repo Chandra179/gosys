@@ -40,6 +40,7 @@ func PointerEscapeReturn(idx *astsite.Index, path []ast.Node, site pprofstats.Si
 				"can't outlive that frame. If callers only read the result, consider returning the "+
 				"value type instead of a pointer, or writing into a caller-supplied buffer.",
 			site.Line, strings.TrimSpace(src), funcName(fn)),
-		Source: strings.TrimSpace(src),
+		Source:     strings.TrimSpace(src),
+		SourceLine: int64(idx.Fset.Position(expr.Pos()).Line),
 	}
 }

@@ -32,6 +32,7 @@ func RangeValueEscape(idx *astsite.Index, path []ast.Node, site pprofstats.Site)
 				"Each iteration gets its own copy of the value, so this escapes a fresh copy to the heap every time. "+
 				"If you need a stable pointer per element, index the slice directly (&xs[i]) instead of the range value.",
 			site.Line, name, strings.TrimSpace(src)),
-		Source: strings.TrimSpace(src),
+		Source:     strings.TrimSpace(src),
+		SourceLine: int64(idx.Fset.Position(expr.Pos()).Line),
 	}
 }

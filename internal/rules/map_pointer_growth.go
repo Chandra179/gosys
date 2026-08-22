@@ -40,7 +40,8 @@ func MapPointerGrowth(idx *astsite.Index, path []ast.Node, site pprofstats.Site)
 					"map[K]*V retains every entry's pointee on the heap and never releases bucket memory as entries are removed. "+
 					"If this map is long-lived, confirm entries are actively evicted (TTL, LRU, explicit delete) rather than only appended to.",
 				site.Line, strings.TrimSpace(mapName)),
-			Source: strings.TrimSpace(src),
+			Source:     strings.TrimSpace(src),
+			SourceLine: int64(idx.Fset.Position(assign.Pos()).Line),
 		}
 	}
 	return nil

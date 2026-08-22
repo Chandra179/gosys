@@ -10,4 +10,5 @@ test:
 	go test ./...
 
 dashboard:
-	go run ./cmd/dashboard -addr $(or $(ADDR),:8080)
+	-fuser -k $(subst :,,$(or $(ADDR),:8083))/tcp
+	go run ./cmd/dashboard -addr $(or $(ADDR),:8083)

@@ -17,6 +17,11 @@
           <input type="text" id="target" name="target" placeholder="localhost:6060" required
                  class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
         </div>
+        <div class="flex-1 min-w-[220px]">
+          <label for="repo" class="block text-xs font-semibold text-slate-500 mb-1">Repo dir</label>
+          <input type="text" id="repo" name="repo" value="{{.RepoDir}}" placeholder="/path/to/checkout" required
+                 class="block w-full border border-slate-300 rounded px-2 py-1 text-sm">
+        </div>
         <div class="w-24">
           <label for="top" class="block text-xs font-semibold text-slate-500 mb-1">Top N</label>
           <input type="number" id="top" name="top" value="{{.Top}}" min="1"
@@ -28,7 +33,7 @@
       </form>
     </div>
     <p class="max-w-[1400px] mx-auto px-4 pb-2 text-xs text-slate-500">
-      Fetches <code>/debug/pprof/heap</code> directly from the target and runs it against this repo checkout.
+      Fetches <code>/debug/pprof/heap</code> directly from the target and runs it against the repo dir given above.
     </p>
   </header>
 

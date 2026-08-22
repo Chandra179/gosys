@@ -43,6 +43,7 @@ func AllocInLoopWithoutPool(idx *astsite.Index, path []ast.Node, site pprofstats
 				"Per-iteration allocation of short-lived buffers is a common source of GC pressure at high throughput; "+
 				"consider reusing a buffer via sync.Pool if this loop runs frequently.",
 			site.Line, funcName(fn)),
-		Source: strings.TrimSpace(callSrc),
+		Source:     strings.TrimSpace(callSrc),
+		SourceLine: int64(idx.Fset.Position(call.Pos()).Line),
 	}
 }

@@ -135,24 +135,18 @@ func (idx *Index) resolveFile(file string) *ast.File {
 	// Fall back to matching by trailing path components, since pprof
 	// embeds whatever path the binary was built with (which may differ
 	// from the path the repo is checked out at, e.g. under -trimpath or
-	// a different GOPATH).
+	// a different GOPATH). This requires real path overlap (at least one
+	// shared parent directory, not just the bare filename) — a bare
+	// basename match (e.g. both repos happening to have a "main.go") is
+	// not evidence they're the same file, and silently matching on it
+	// produces a confident-looking but wrong finding instead of a
+	// visible "unresolved" result.
 	want := filepath.ToSlash(file)
 	for path, f := range idx.files {
-		if strings.HasSuffix(filepath.ToSlash(path), want) || strings.HasSuffix(want, filepath.ToSlash(path)) {
+		p := filepath.ToSlash(path)
+		if strings.HasSuffix(p, want) || strings.HasSuffix(want, p) {
 			return f
 		}
-	}
-	base := filepath.Base(file)
-	var candidate *ast.File
-	matches := 0
-	for path, f := range idx.files {
-		if filepath.Base(path) == base {
-			candidate = f
-			matches++
-		}
-	}
-	if matches == 1 {
-		return candidate
 	}
 	return nil
 }

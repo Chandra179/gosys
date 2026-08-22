@@ -28,10 +28,11 @@ import (
 
 // Finding is one rule match at one hot allocation site.
 type Finding struct {
-	Site    pprofstats.Site
-	Pattern string
-	Message string
-	Source  string // the matched source snippet, for the reader to judge
+	Site       pprofstats.Site
+	Pattern    string
+	Message    string
+	Source     string // the matched source snippet, for the reader to judge
+	SourceLine int64  // the line Source's first line starts at, for gutter numbering in the UI
 }
 
 // Rule inspects the AST path at a hot site (innermost node first) and

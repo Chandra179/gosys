@@ -69,8 +69,30 @@ func ClosureCapture(idx *astsite.Index, path []ast.Node, site pprofstats.Site) *
 			"line %d is part of a closure that captures %q from %s's scope and is %s. "+
 				"Go closures capture variables by reference, so once the closure outlives "+
 				"the stack frame that declared it, escape analysis moves the captured "+
-				"variable onto the heap: %s",
-			site.Line, name, funcName(fn), esc.reason, strings.TrimSpace(src)),
-		Source: strings.TrimSpace(src),
+				"variable onto the heap. %s",
+			site.Line, name, funcName(fn), esc.reason, escapeGuidance(esc.reason)),
+		Source:     strings.TrimSpace(src),
+		SourceLine: int64(idx.Fset.Position(esc.lit.Pos()).Line),
+	}
+}
+
+// escapeGuidance returns judgment guidance tailored to *why* the closure
+// escapes, since that changes what "safe" looks like: a goroutine launch is
+// a concurrency-safety question, a returned closure is an ordinary
+// factory/currying pattern with no concurrency angle at all, and a
+// package-level store is a lifetime question. A single generic checklist
+// across all three would misdirect on at least two of them.
+func escapeGuidance(reason string) string {
+	switch reason {
+	case "launched as a goroutine":
+		return "Likely fine if the capture is a sync primitive (sync.WaitGroup, sync.Mutex, a channel) or read-only for the goroutine's lifetime. " +
+			"Worth a closer look if it's a large or mutable buffer/struct captured per-goroutine, or if nothing bounds how many goroutines can be in flight at once."
+	case "returned from the function":
+		return "This is the ordinary closure-factory/currying pattern (e.g. building a middleware or callback) — the escape is expected and usually not a concern by itself. " +
+			"Worth a closer look only if the captured variable is unexpectedly large, since every call to this function now pins a copy of it on the heap."
+	case "stored into a package-level variable":
+		return "The capture is now pinned for the life of the program. Worth a closer look if this runs repeatedly (e.g. inside a loop appending to the global) with nothing ever removing old entries, since that's unbounded growth rather than a one-time cost."
+	default:
+		return ""
 	}
 }

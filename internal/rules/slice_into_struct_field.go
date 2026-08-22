@@ -39,7 +39,8 @@ func SliceIntoStructField(idx *astsite.Index, path []ast.Node, site pprofstats.S
 					"if the source slice is large and long-lived, this can pin far more memory than the field needs. "+
 					"Consider copying just the needed bytes instead of re-slicing.",
 				site.Line, sel.Sel.Name),
-			Source: strings.TrimSpace(src),
+			Source:     strings.TrimSpace(src),
+			SourceLine: int64(idx.Fset.Position(assign.Pos()).Line),
 		}
 	}
 	return nil

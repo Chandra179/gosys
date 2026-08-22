@@ -6,35 +6,23 @@
 {{else}}
   <script type="application/json" id="treemap-data">{{.TreemapJSON}}</script>
 
-  <div class="grid grid-cols-1 lg:grid-cols-[7fr_5fr] gap-6 items-start">
-    <div class="lg:sticky lg:top-4 border border-slate-200 rounded-lg p-3 shadow-sm">
-      <div class="flex items-center gap-2 text-sm mb-2" id="tm-crumbs"></div>
-      <div class="flex justify-between font-mono text-xs text-slate-400 px-1 mb-2">
-        <span id="tm-meta-count"></span>
-        <span id="tm-meta-total"></span>
-      </div>
-      <svg id="treemap" viewBox="0 0 900 460" class="w-full h-auto rounded"></svg>
-      <p class="text-xs text-slate-500 mt-2" id="tm-subtitle"></p>
-      <div class="flex gap-4 text-xs text-slate-500 mt-2" id="tm-legend"></div>
+  <div class="border border-slate-200 rounded-lg p-3 shadow-sm mb-6">
+    <div class="flex items-center gap-2 text-sm mb-2" id="tm-crumbs"></div>
+    <div class="flex justify-between font-mono text-xs text-slate-400 px-1 mb-2">
+      <span id="tm-meta-count"></span>
+      <span id="tm-meta-total"></span>
     </div>
+    <svg id="treemap" viewBox="0 0 1400 320" class="w-full h-auto rounded"></svg>
+    <p class="text-xs text-slate-500 mt-2" id="tm-subtitle"></p>
+    <div class="flex gap-4 text-xs text-slate-500 mt-2" id="tm-legend"></div>
+  </div>
 
-    <div id="findings-list" class="space-y-4 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1">
-      {{range .Results}}
-        <div class="border border-slate-200 rounded-lg p-4 shadow-sm transition-shadow" data-site="{{.Site.File}}:{{.Site.Line}}">
-          <h3 class="font-mono text-sm text-slate-700">{{.Site.File}}:{{.Site.Line}} &mdash; {{.Site.Flat}} bytes ({{.Site.Function}})</h3>
-          {{if .Findings}}
-            {{range .Findings}}
-              <div class="border-l-4 border-amber-500 pl-3 mt-3">
-                <div class="font-semibold text-amber-700">{{.Pattern}}</div>
-                <p class="text-sm text-slate-700 mt-1">{{.Message}}</p>
-                {{if .Source}}<pre class="bg-slate-50 text-sm p-2 mt-2 rounded overflow-x-auto">{{.Source}}</pre>{{end}}
-              </div>
-            {{end}}
-          {{else}}
-            <p class="text-slate-400 text-sm mt-2">no known anti-pattern matched</p>
-          {{end}}
-        </div>
-      {{end}}
+  <div class="border border-slate-200 rounded-lg overflow-hidden"
+       title="Allocation sites gosys analyzed, ranked by flat bytes. Select a site on the left to see its matched rule(s), guidance, and source on the right.">
+    <div class="px-4 py-2 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">Findings</div>
+    <div class="grid grid-cols-1 md:grid-cols-[300px_1fr]">
+      <div id="findings-rows" class="divide-y divide-slate-200 md:border-r md:border-slate-200 md:max-h-[calc(100vh-20rem)] md:overflow-y-auto"></div>
+      <div id="findings-detail" class="p-6"></div>
     </div>
   </div>
 
@@ -129,13 +117,25 @@
     var totalBytes = sites.reduce(function (s, d) { return s + d.bytes; }, 0) || 1;
     var maxSiteBytes = Math.max.apply(null, sites.map(function (s) { return s.bytes; }));
 
-    function colorForSite(d) {
-      if (!d.pattern) return "#e2e8f0";
-      var t = d.bytes / maxSiteBytes;
-      if (t > 0.55) return "#b45309";
-      if (t > 0.22) return "#f59e0b";
-      return "#fde68a";
+    function severityTier(s) {
+      if (!s.pattern) return "none";
+      var t = s.bytes / maxSiteBytes;
+      if (t > 0.55) return "high";
+      if (t > 0.22) return "mid";
+      return "low";
     }
+    var tierColor = { high: "#b45309", mid: "#f59e0b", low: "#fde68a", none: "#e2e8f0" };
+    // tierTitle backs the tooltip on each severity bar. This is a per-site
+    // metric (flagged status + share of the hottest site's bytes), distinct
+    // from the treemap's "All packages" legend, which aggregates by package
+    // (% of sites flagged) -- same amber palette, different question answered.
+    var tierTitle = {
+      high: "Flagged — high severity: a large share of the hottest site's bytes",
+      mid: "Flagged — medium severity",
+      low: "Flagged — low severity: a small share of the hottest site's bytes",
+      none: "No pattern matched"
+    };
+    function colorForSite(d) { return tierColor[severityTier(d)]; }
     function colorForPackage(g) {
       var frac = g.flagged / g.count;
       if (frac === 0) return "#e2e8f0";
@@ -147,7 +147,7 @@
 
     var svgNS = "http://www.w3.org/2000/svg";
     var svg = document.getElementById("treemap");
-    var W = 900, H = 460;
+    var W = 1400, H = 320;
     var currentPackage = null;
     var selectedEl = null;
 
@@ -220,12 +220,14 @@
         ? "Packages, sized by total flat bytes. Click one to drill into its allocation sites."
         : "Sites within " + currentPackage.key + ", sized by flat bytes. Color marks whether a gosys rule matched.";
       document.getElementById("tm-legend").innerHTML = isRoot
-        ? '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0"></span>0% flagged</div>'
-        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a"></span>partly flagged</div>'
-        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309"></span>mostly flagged</div>'
-        : '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0"></span>no pattern matched</div>'
-        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a"></span>flagged &middot; small</div>'
-        + '<div class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309"></span>flagged &middot; large</div>';
+        ? '<span class="text-slate-400">Color = share of sites in the package matched by a rule:</span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0" title="0% of sites in this package matched a gosys rule"></span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a" title="1&ndash;60% of sites in this package matched a gosys rule"></span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309" title="Over 60% of sites in this package matched a gosys rule"></span>'
+        : '<span class="text-slate-400">Color = whether &amp; how much this site was flagged, relative to the hottest site shown:</span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#e2e8f0" title="This allocation site did not match any gosys rule"></span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#fde68a" title="Matched a rule; flat bytes are a small share of the hottest site in this package"></span>'
+        + '<span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#b45309" title="Matched a rule; flat bytes are a large share of the hottest site in this package"></span>';
 
       renderCrumbs();
     }
@@ -253,16 +255,125 @@
       }
     }
 
-    var highlightedCard = null;
+    // ---------------- findings list + detail (two-pane, borderless) ----------------
 
-    // findCard uses an attribute-value scan rather than a CSS selector so
-    // file paths with slashes/colons never need escaping.
-    function findCard(key) {
-      var cards = document.querySelectorAll("#findings-list [data-site]");
-      for (var i = 0; i < cards.length; i++) {
-        if (cards[i].getAttribute("data-site") === key) return cards[i];
+    var rowsEl = document.getElementById("findings-rows");
+    var detailEl = document.getElementById("findings-detail");
+    var rowEls = []; // parallel to sites, for selection styling
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function renderRows() {
+      rowsEl.innerHTML = "";
+      rowEls = [];
+      sites.forEach(function (s, i) {
+        var tier = severityTier(s);
+        var row = document.createElement("div");
+        row.className = "flex gap-3 pl-3 pr-4 py-3 cursor-pointer hover:bg-slate-50 relative";
+        row.style.borderLeft = tier === "none" ? "4px solid transparent" : "4px solid " + tierColor[tier];
+        row.title = tierTitle[tier];
+        row.innerHTML =
+          '<div class="min-w-0 flex-1">' +
+            '<div class="font-mono text-xs font-semibold text-slate-700 truncate mb-0.5">' + (escapeHtml(s.pattern) || "no pattern matched") + "</div>" +
+            '<div class="font-mono text-[11px] text-slate-400 truncate">' + escapeHtml(s.fn) + ":" + s.line + "</div>" +
+            '<div class="font-mono text-[11px] text-slate-500 mt-0.5">' + fmtBytes(s.bytes) + "</div>" +
+          "</div>";
+        row.addEventListener("click", function () { selectSite(i); });
+        rowsEl.appendChild(row);
+        rowEls.push(row);
+      });
+    }
+
+    function highlightRow(i) {
+      rowEls.forEach(function (el, idx) {
+        el.classList.toggle("bg-blue-50", idx === i);
+      });
+    }
+
+    // codeViewer renders a bordered, line-numbered code block for one
+    // finding's Source, starting the gutter at SourceLine so numbers match
+    // the real file -- this is what replaced the old fixed-height
+    // overflow-x:auto <pre> that forced horizontal scrolling to read.
+    function codeViewer(finding, site) {
+      var lines = finding.source ? finding.source.replace(/\s+$/, "").split("\n") : [];
+      var startLine = finding.sourceLine || site.line;
+      var rowsHtml = lines.map(function (line, i) {
+        return '<div class="flex">' +
+          '<span class="flex-none w-10 text-right pr-3 text-slate-400 text-xs font-mono leading-6 select-none">' + (startLine + i) + "</span>" +
+          '<span class="flex-1 min-w-0 text-xs font-mono leading-6 text-slate-800 whitespace-pre-wrap break-words">' + (escapeHtml(line) || "&nbsp;") + "</span>" +
+        "</div>";
+      }).join("");
+
+      var wrap = document.createElement("div");
+      wrap.className = "border border-slate-200 rounded-md overflow-hidden mt-3";
+      wrap.innerHTML =
+        '<div class="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border-b border-slate-200">' +
+          '<span class="font-mono text-xs text-slate-500"><b class="text-slate-700 font-semibold">' + escapeHtml(site.file.split("/").pop()) + "</b> &middot; " + escapeHtml(site.fn) + "</span>" +
+          '<span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400 border border-slate-200 rounded px-1.5 py-0.5">go</span>' +
+          '<button type="button" class="ml-auto text-xs font-semibold text-slate-500 border border-slate-200 rounded px-2 py-0.5 hover:bg-white">⧉ Copy</button>' +
+        "</div>" +
+        '<div class="py-2 overflow-x-auto">' + rowsHtml + "</div>";
+
+      wrap.querySelector("button").addEventListener("click", function (e) {
+        var btn = e.currentTarget;
+        try { navigator.clipboard && navigator.clipboard.writeText(lines.join("\n")); } catch (err) {}
+        var original = btn.textContent;
+        btn.textContent = "✓ Copied";
+        setTimeout(function () { btn.textContent = original; }, 1200);
+      });
+
+      return wrap;
+    }
+
+    function renderDetail(i) {
+      var s = sites[i];
+      detailEl.innerHTML = "";
+      detailEl.className = "p-6";
+      var body = document.createElement("div");
+      detailEl.appendChild(body);
+
+      var head = document.createElement("div");
+      head.className = "flex items-baseline gap-2 flex-wrap mb-1";
+      head.innerHTML =
+        '<span class="font-mono text-sm font-semibold text-slate-800">' + (escapeHtml(s.pattern) || "no pattern matched") + "</span>" +
+        '<span class="font-mono text-xs text-slate-400 ml-1">' + escapeHtml(s.file) + ":" + s.line + " &middot; " + escapeHtml(s.fn) + "</span>" +
+        '<span class="font-mono text-xs text-slate-500 ml-auto">' + fmtBytes(s.bytes) + "</span>";
+      body.appendChild(head);
+
+      if (!s.findings || !s.findings.length) {
+        var p = document.createElement("p");
+        p.className = "text-sm text-slate-400 mt-3";
+        p.textContent = "This site was hot, but no known anti-pattern matched.";
+        body.appendChild(p);
+        return;
       }
-      return null;
+
+      s.findings.forEach(function (f) {
+        var block = document.createElement("div");
+        block.className = "mt-4 first:mt-3";
+        var msg = document.createElement("p");
+        msg.className = "text-sm text-slate-700 leading-relaxed max-w-[80ch]";
+        msg.textContent = f.message;
+        block.appendChild(msg);
+        if (f.source) block.appendChild(codeViewer(f, s));
+        body.appendChild(block);
+      });
+    }
+
+    function selectSite(i) {
+      highlightRow(i);
+      renderDetail(i);
+    }
+
+    function findSiteIndex(file, line) {
+      for (var i = 0; i < sites.length; i++) {
+        if (sites[i].file === file && sites[i].line === line) return i;
+      }
+      return -1;
     }
 
     function selectTile(n, el) {
@@ -271,15 +382,15 @@
       el.setAttribute("stroke-width", "2.5");
       selectedEl = el;
 
-      if (highlightedCard) highlightedCard.classList.remove("ring-2", "ring-slate-900");
-      var card = findCard(n.file + ":" + n.line);
-      if (card) {
-        card.scrollIntoView({ behavior: "smooth", block: "center" });
-        card.classList.add("ring-2", "ring-slate-900");
-        highlightedCard = card;
+      var idx = findSiteIndex(n.file, n.line);
+      if (idx !== -1) {
+        selectSite(idx);
+        rowEls[idx].scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
 
+    renderRows();
+    if (sites.length) selectSite(0);
     render();
   })();
   </script>

@@ -1,7 +1,7 @@
 // Command dashboard serves a small web UI around pipeline.Analyze: fetch a
 // heap pprof profile live from a target's /debug/pprof/heap, run it against
-// the repo this dashboard is running from, and view the findings rendered
-// as HTML.
+// a repo checkout given in the form, and view the findings rendered as
+// HTML.
 package main
 
 import (
@@ -21,10 +21,12 @@ import (
 	"gosys/internal/pipeline"
 )
 
-// repoDir is the repo AST-matched against pprof sites: the checkout the
-// dashboard itself runs from, since findings only make sense against source
-// that matches the live target's build.
-const repoDir = "."
+// defaultRepoDir is the pre-filled "Repo dir" value: it must be the
+// checkout the live target was built from, since findings only make sense
+// against source that matches the live target's build. "." only resolves
+// correctly when the dashboard is run from that checkout; otherwise the
+// user types the actual repo path into the form.
+const defaultRepoDir = "."
 
 //go:embed templates/*.html
 var templatesFS embed.FS
@@ -39,23 +41,32 @@ type pageData struct {
 	TreemapJSON template.JS
 }
 
-// treemapItem is one allocation site flattened for the client-side treemap:
-// one entry per Result, with any matched findings collapsed onto it since
-// the treemap groups by site, not by individual finding.
+// treemapItem is one allocation site flattened for the client-side treemap
+// and findings panel: one entry per Result. The treemap groups by site (via
+// Pattern/Bytes), while Findings carries each individual match's own text so
+// the findings panel can render one entry per finding, not one per site.
 type treemapItem struct {
-	File    string `json:"file"`
-	Line    int64  `json:"line"`
-	Fn      string `json:"fn"`
-	Bytes   int64  `json:"bytes"`
-	Pattern string `json:"pattern"` // "" if no rule matched
-	Message string `json:"message"`
-	Source  string `json:"source"`
+	File     string        `json:"file"`
+	Line     int64         `json:"line"`
+	Fn       string        `json:"fn"`
+	Bytes    int64         `json:"bytes"`
+	Pattern  string        `json:"pattern"` // "" if no rule matched; joined if several did
+	Findings []findingItem `json:"findings"`
 }
 
-// treemapJSON flattens results into the shape the dashboard's treemap script
-// expects and marshals it for embedding in an `application/json` data
-// island. json.Marshal HTML-escapes <, >, and & by default, which is what
-// makes it safe to inline as template.JS without a script-breakout risk.
+// findingItem is one rules.Finding, flattened for the JSON data island.
+type findingItem struct {
+	Pattern    string `json:"pattern"`
+	Message    string `json:"message"`
+	Source     string `json:"source"`
+	SourceLine int64  `json:"sourceLine"`
+}
+
+// treemapJSON flattens results into the shape the dashboard's client-side
+// script expects and marshals it for embedding in an `application/json`
+// data island. json.Marshal HTML-escapes <, >, and & by default, which is
+// what makes it safe to inline as template.JS without a script-breakout
+// risk.
 func treemapJSON(results []pipeline.Result) template.JS {
 	items := make([]treemapItem, 0, len(results))
 	for _, r := range results {
@@ -67,14 +78,18 @@ func treemapJSON(results []pipeline.Result) template.JS {
 		}
 		if len(r.Findings) > 0 {
 			patterns := make([]string, len(r.Findings))
-			messages := make([]string, len(r.Findings))
+			findings := make([]findingItem, len(r.Findings))
 			for i, f := range r.Findings {
 				patterns[i] = f.Pattern
-				messages[i] = f.Message
+				findings[i] = findingItem{
+					Pattern:    f.Pattern,
+					Message:    f.Message,
+					Source:     f.Source,
+					SourceLine: f.SourceLine,
+				}
 			}
 			item.Pattern = strings.Join(patterns, ", ")
-			item.Message = strings.Join(messages, " ")
-			item.Source = r.Findings[0].Source
+			item.Findings = findings
 		}
 		items = append(items, item)
 	}
@@ -103,7 +118,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	renderPage(w, pageData{RepoDir: repoDir, Top: 10, TreemapJSON: treemapJSON(nil)})
+	renderPage(w, pageData{RepoDir: defaultRepoDir, Top: 10, TreemapJSON: treemapJSON(nil)})
 }
 
 func handleAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -113,11 +128,14 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		RepoDir: repoDir,
+		RepoDir: defaultRepoDir,
 		Top:     10,
 	}
 	if v := r.FormValue("top"); v != "" {
 		fmt.Sscanf(v, "%d", &data.Top)
+	}
+	if v := strings.TrimSpace(r.FormValue("repo")); v != "" {
+		data.RepoDir = v
 	}
 
 	target := strings.TrimSpace(r.FormValue("target"))

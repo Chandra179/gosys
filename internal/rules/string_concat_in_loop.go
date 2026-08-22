@@ -41,7 +41,8 @@ func StringConcatInLoop(idx *astsite.Index, path []ast.Node, site pprofstats.Sit
 				"Each iteration allocates a new backing array sized to the accumulated string so far, an O(n^2) cost as the loop grows. "+
 				"Consider building the result with strings.Builder (or bytes.Buffer) and writing once per iteration instead.",
 			site.Line, op),
-		Source: strings.TrimSpace(src),
+		Source:     strings.TrimSpace(src),
+		SourceLine: int64(idx.Fset.Position(assign.Pos()).Line),
 	}
 }
 

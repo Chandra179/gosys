@@ -39,6 +39,7 @@ func BytesToStringInLoop(idx *astsite.Index, path []ast.Node, site pprofstats.Si
 				"converted every iteration, consider converting once outside the loop, or comparing "+
 				"the []byte directly with bytes.Equal instead.",
 			site.Line),
-		Source: strings.TrimSpace(src),
+		Source:     strings.TrimSpace(src),
+		SourceLine: int64(idx.Fset.Position(call.Pos()).Line),
 	}
 }
